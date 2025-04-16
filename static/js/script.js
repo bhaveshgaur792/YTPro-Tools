@@ -8,7 +8,7 @@ document.getElementById("analyze-form").addEventListener("submit", async (e) => 
     errorDiv.classList.add("d-none");
 
     try {
-        const response = await fetch("https://your-backend.up.railway.app/analyze", {
+        const response = await fetch("https://mindful-gentleness-production.up.railway.app/analyze", {
             method: "POST",
             headers: { "Content-Type": "application/x-www-form-urlencoded" },
             body: `url=${encodeURIComponent(url)}`
