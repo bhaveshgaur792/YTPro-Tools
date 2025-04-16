@@ -33,20 +33,32 @@ def scrape_youtube(url):
         html = requests.get(url, headers=headers).text
         soup = BeautifulSoup(html, "html.parser")
 
+        title = soup.find("meta", property="og:title")
+        thumbnail = soup.find("meta", property="og:image")
+        views = soup.select_one(".watch-view-count")
+        channel = soup.select_one("#channel-name a")
+        duration = soup.select_one(".ytp-time-duration")
+        keywords_script = soup.find("script", text=lambda t: t and "keywords" in t)
+
         data = {
-            "title": soup.find("meta", property="og:title")["content"],
-            "views": soup.select_one(".watch-view-count").text.split()[0],
-            "channel": soup.select_one("#channel-name a").text.strip(),
-            "duration": soup.select_one(".ytp-time-duration").text,
-            "thumbnail": soup.find("meta", property="og:image")["content"],
-            "tags": json.loads(
-                soup.find("script", text=lambda t: "keywords" in str(t)).text
-                .split('"keywords":[')[1].split(']')[0]
-                .replace('"', '').split(',')[:5]
-            )
+            "title": title["content"] if title else "N/A",
+            "views": views.text.split()[0] if views else "N/A",
+            "channel": channel.text.strip() if channel else "N/A",
+            "duration": duration.text if duration else "N/A",
+            "thumbnail": thumbnail["content"] if thumbnail else "N/A",
+            "tags": []
         }
+
+        if keywords_script:
+            try:
+                keywords_raw = keywords_script.text.split('"keywords":[')[1].split(']')[0]
+                data["tags"] = keywords_raw.replace('"', '').split(',')[:5]
+            except Exception:
+                data["tags"] = []
+
         save_cache(url, data)
         return data
+
     except Exception as e:
         return {"error": str(e)}
 
@@ -62,4 +74,5 @@ def analyze():
     return jsonify(scrape_youtube(url))
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
