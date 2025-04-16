@@ -1,0 +1,11 @@
+{
+  "build": {
+    "use": "@railway/python",
+    "variables": {
+      "pythonVersion": "3.9"
+    }
+  },
+  "deploy": {
+    "startCommand": "gunicorn app:app --timeout 120"
+  }
+}
