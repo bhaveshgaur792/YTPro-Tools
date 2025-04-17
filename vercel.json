@@ -2,7 +2,7 @@
   "version": 2,
   "builds": [
     {
-      "src": "app.py",
+      "src": "api/*.py",
       "use": "@vercel/python@3.9"
     },
     {
@@ -17,7 +17,7 @@
     },
     {
       "src": "/analyze",
-      "dest": "app.py"
+      "dest": "api/app.py"
     },
     {
       "src": "/(.*)",
