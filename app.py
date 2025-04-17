@@ -2,73 +2,89 @@ from flask import Flask, request, jsonify, render_template
 from bs4 import BeautifulSoup
 import requests
 import json
+import re
 import os
 from datetime import datetime
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+CORS(app)
 
 CACHE_FILE = "cache.json"
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 
 def normalize_youtube_url(url):
-    """Convert all YouTube URL formats to standard watch?v= format"""
-    if "youtu.be" in url:
-        # Handle shortened URLs
-        video_id = url.split("/")[-1].split("?")[0]
-        return f"https://www.youtube.com/watch?v={video_id}"
-    elif "/shorts/" in url:
-        # Handle YouTube Shorts URLs
-        video_id = url.split("/shorts/")[1].split("?")[0]
-        return f"https://www.youtube.com/watch?v={video_id}"
-    elif "embed/" in url:
-        # Handle embedded player URLs
-        video_id = url.split("embed/")[1].split("?")[0]
-        return f"https://www.youtube.com/watch?v={video_id}"
-    else:
-        # Clean parameters from standard URLs
-        return url.split("?")[0]
+    """Handle all YouTube URL formats"""
+    patterns = [
+        (r'(https?://youtu\.be/)([\w-]+)', 'https://www.youtube.com/watch?v={}'),
+        (r'(https?://(?:www\.|m\.)?youtube\.com/shorts/)([\w-]+)', 'https://www.youtube.com/watch?v={}'),
+        (r'(https?://(?:www\.|m\.)?youtube\.com/embed/)([\w-]+)', 'https://www.youtube.com/watch?v={}'),
+        (r'(https?://(?:www\.|m\.)?youtube\.com/watch\?v=)([\w-]+)', 'https://www.youtube.com/watch?v={}')
+    ]
+    
+    for pattern, template in patterns:
+        match = re.search(pattern, url)
+        if match:
+            return template.format(match.group(2))
+    return url.split('?')[0]
 
-def get_text(soup, selector):
-    """Safe element text extraction"""
-    element = soup.select_one(selector)
-    return element.text.strip() if element else "N/A"
+def extract_views(soup):
+    """Multi-method view extraction"""
+    # Method 1: From metadata
+    meta_view = soup.find("meta", {"itemprop": "interactionCount"})
+    if meta_view:
+        return f"{int(meta_view['content']):,}"
+    
+    # Method 2: From visible text
+    view_text = soup.find("span", string=re.compile(r'views', re.IGNORECASE))
+    if view_text:
+        return view_text.text.split()[0]
+    
+    return "N/A"
 
-def get_meta_content(soup, property_name):
-    """Safe meta tag content extraction"""
-    meta = soup.find("meta", {"property": property_name})
-    return meta["content"] if meta else "N/A"
+def extract_channel(soup):
+    """Robust channel extraction"""
+    channel = soup.find("span", {"itemprop": "author"}).find("link", {"itemprop": "name"})
+    return channel["content"] if channel else "N/A"
+
+def extract_duration(soup):
+    """Duration from multiple sources"""
+    # Method 1: Video player duration
+    duration = soup.find("span", {"class": "ytp-time-duration"})
+    # Method 2: Mobile/alternative layout
+    if not duration:
+        duration = soup.find("div", {"id": "timestamp"})
+    return duration.text if duration else "N/A"
 
 def extract_tags(soup):
-    """Robust tag extraction from JSON"""
-    try:
-        script = soup.find("script", text=lambda t: t and '"keywords":[' in t)
-        if script:
-            json_text = script.text.split('"keywords":[')[1].split(']')[0]
-            return [tag.strip('"') for tag in json_text.split(',')[:5]]
-        return []
-    except Exception as e:
-        return []
+    """Extract tags from JSON-LD data"""
+    script = soup.find("script", {"type": "application/ld+json"})
+    if script:
+        try:
+            data = json.loads(script.text)
+            return data.get("keywords", [])[:5]
+        except:
+            pass
+    return []
 
 def scrape_youtube(url):
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.9"
-        }
-        html = requests.get(url, headers=headers, timeout=10).text
-        soup = BeautifulSoup(html, "html.parser")
-
+        headers = {"User-Agent": USER_AGENT}
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
         return {
-            "title": get_meta_content(soup, "og:title"),
-            "views": get_text(soup, "span.yt-core-attributed-string"),
-            "channel": get_text(soup, "a.yt-simple-endpoint.style-scope.yt-formatted-string"),
-            "duration": get_text(soup, "span.ytp-time-duration"),
-            "thumbnail": get_meta_content(soup, "og:image"),
+            "title": soup.find("meta", {"name": "title"})["content"],
+            "views": extract_views(soup),
+            "channel": extract_channel(soup),
+            "duration": extract_duration(soup),
+            "thumbnail": soup.find("meta", {"property": "og:image"})["content"],
             "tags": extract_tags(soup)
         }
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": f"Failed to analyze video: {str(e)}"}
 
 @app.route("/")
 def home():
@@ -76,19 +92,14 @@ def home():
 
 @app.route("/analyze", methods=["POST"])
 def analyze():
-    url = request.form.get("url")
-    if not url:
-        return jsonify({"error": "No URL provided"})
-
     try:
-        # Normalize URL before processing
-        normalized_url = normalize_youtube_url(url)
-        if "youtube.com/watch?v=" not in normalized_url:
-            return jsonify({"error": "Invalid YouTube URL"})
-            
-        return jsonify(scrape_youtube(normalized_url))
+        url = request.form["url"]
+        clean_url = normalize_youtube_url(url)
+        return jsonify(scrape_youtube(clean_url))
+    except KeyError:
+        return jsonify({"error": "No URL provided"})
     except Exception as e:
-        return jsonify({"error": f"Invalid URL format: {str(e)}"})
+        return jsonify({"error": str(e)})
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=False)
