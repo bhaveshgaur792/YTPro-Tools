@@ -4,7 +4,7 @@ document.getElementById("analyze-form").addEventListener("submit", async (e) => 
     const resultsDiv = document.getElementById("results");
     const errorDiv = document.getElementById("error");
 
-    // Reset UI
+    // Reset UI state
     resultsDiv.classList.add("d-none");
     errorDiv.classList.add("d-none");
 
@@ -23,7 +23,7 @@ document.getElementById("analyze-form").addEventListener("submit", async (e) => 
 
         if (data.error) throw new Error(data.error);
 
-        // Update UI
+        // Update UI with results
         document.getElementById("title").textContent = data.title;
         document.getElementById("channel").textContent = data.channel;
         document.getElementById("views").textContent = data.views;
@@ -34,6 +34,6 @@ document.getElementById("analyze-form").addEventListener("submit", async (e) => 
     } catch (err) {
         errorDiv.textContent = `Error: ${err.message}`;
         errorDiv.classList.remove("d-none");
-        console.error("Fetch error:", err);
+        console.error("Analysis error:", err);
     }
 });
